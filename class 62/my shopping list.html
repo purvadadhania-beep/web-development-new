@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Shopping List</title>
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --card: #fff;
+            --accent: #2b6cb0;
+            --muted: #6b7280;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+            background: var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .app {
+            width: 100%;
+            max-width: 720px;
+            background: var(--card);
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(22, 23, 24, 0.08);
+            padding: 20px;
+        }
+
+        h1 {
+            margin: 0 0 12px 0;
+            font-size: 1.4rem;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #e6e9ee;
+            font-size: 1rem;
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600
+        }
+
+        button.ghost {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid #e6e9ee
+        }
+
+        .list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 380px;
+            overflow: auto;
+        }
+
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #f0f2f5;
+        }
+
+        .item .label {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px
+        }
+
+        .item .name {
+            font-size: 1rem
+        }
+
+        .item.bought .name {
+            text-decoration: line-through;
+            color: var(--muted)
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px
+        }
+
+        .small {
+            font-size: 0.875rem;
+            color: var(--muted)
+        }
+
+        .counts {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-top: 12px
+        }
+
+        .editable {
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px dashed transparent
+        }
+
+        .editable:focus {
+            outline: none;
+            border-color: #cbd5e1
+        }
+
+        @media (max-width:520px) {
+            .controls {
+                flex-direction: column
+            }
+
+            button {
+                width: 100%
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="app" role="main">
+        <h1>Shopping List</h1>
+        <p class="small">Add items, mark bought, edit inline, and they persist in your browser.</p>
+
+        <form id="addForm" class="controls" aria-label="Add item">
+            <input id="itemInput" type="text" placeholder="Add an item (e.g., Milk)" autocomplete="off" />
+            <button id="addBtn" type="submit">Add</button>
+            <button id="clearBought" type="button" class="ghost">Clear bought</button>
+            <button id="clearAll" type="button" class="ghost">Clear all</button>
+        </form>
+
+        <ul id="list" class="list" aria-live="polite"></ul>
+
+        <div class="counts">
+            <div class="small" id="totalCount">Total: 0</div>
+            <div class="small" id="remainingCount">Remaining: 0</div>
+        </div>
+    </main>
+
+    <script>
+        // Simple shopping list with localStorage persistence
+        const KEY = 'shopping-list:v1';
+        const addForm = document.getElementById('addForm');
+        const itemInput = document.getElementById('itemInput');
+        const listEl = document.getElementById('list');
+        const totalCountEl = document.getElementById('totalCount');
+        const remainingCountEl = document.getElementById('remainingCount');
+        const clearBoughtBtn = document.getElementById('clearBought');
+        const clearAllBtn = document.getElementById('clearAll');
+
+        let items = [];
+
+        function save() {
+            localStorage.setItem(KEY, JSON.stringify(items));
+        }
+
+        function load() {
+            try {
+                const raw = localStorage.getItem(KEY);
+                items = raw ? JSON.parse(raw) : [];
+            } catch (e) { items = []; }
+        }
+
+        function render() {
+            listEl.innerHTML = '';
+            items.forEach(item => {
+                const li = document.createElement('li');
+                li.className = 'item' + (item.bought ? ' bought' : '');
+                li.dataset.id = item.id;
+
+                const label = document.createElement('div');
+                label.className = 'label';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = !!item.bought;
+                checkbox.addEventListener('change', () => toggleBought(item.id));
+
+                const name = document.createElement('div');
+                name.className = 'name editable';
+                name.contentEditable = true;
+                name.spellcheck = false;
+                name.textContent = item.name;
+                // save edits on blur or Enter
+                name.addEventListener('blur', () => updateName(item.id, name.textContent.trim() || item.name));
+                name.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        name.blur();
+                    }
+                });
+
+                label.appendChild(checkbox);
+                label.appendChild(name);
+
+                const actions = document.createElement('div');
+                actions.className = 'actions';
+
+                const del = document.createElement('button');
+                del.textContent = 'Delete';
+                del.className = 'ghost';
+                del.type = 'button';
+                del.addEventListener('click', () => removeItem(item.id));
+
+                actions.appendChild(del);
+
+                li.appendChild(label);
+                li.appendChild(actions);
+                listEl.appendChild(li);
+            });
+
+            const total = items.length;
+            const remaining = items.filter(i => !i.bought).length;
+            totalCountEl.textContent = `Total: ${total}`;
+            remainingCountEl.textContent = `Remaining: ${remaining}`;
+            save();
+        }
+
+        function addItem(name) {
+            name = (name || '').trim();
+            if (!name) return;
+            items.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, bought: false });
+            render();
+        }
+
+        function toggleBought(id) {
+            const it = items.find(i => i.id === id);
+            if (!it) return;
+            it.bought = !it.bought;
+            render();
+        }
+
+        function removeItem(id) {
+            items = items.filter(i => i.id !== id);
+            render();
+        }
+
+        function updateName(id, newName) {
+            const it = items.find(i => i.id === id);
+            if (!it) return;
+            if (newName) it.name = newName;
+            render();
+        }
+
+        clearBoughtBtn.addEventListener('click', () => {
+            items = items.filter(i => !i.bought);
+            render();
+        });
+
+        clearAllBtn.addEventListener('click', () => {
+            if (confirm('Clear the whole list?')) {
+                items = [];
+                render();
+            }
+        });
+
+        addForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            addItem(itemInput.value);
+            itemInput.value = '';
+            itemInput.focus();
+        });
+
+        // keyboard shortcut: Ctrl+K focuses input
+        window.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                itemInput.focus();
+                itemInput.select();
+            }
+        });
+
+        // Initialize
+        load();
+        render();
+    </script>
+</body>
+
+</html>
